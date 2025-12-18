@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script para treinar modelo DETR/RT-DETR - ObjectDetection_DETR.
+Script para treinar modelo DETR/RT-DETR - ObjectDetection_RT-DETR.
 """
 
 import os
@@ -10,8 +10,17 @@ import argparse
 import subprocess
 import csv
 import time
+import warnings
 from pathlib import Path
 from datetime import datetime
+
+# Suprimir warnings específicos
+warnings.filterwarnings("ignore", category=UserWarning, module="torch.nn.modules.module")
+warnings.filterwarnings("ignore", message=".*copying from a non-meta parameter.*")
+warnings.filterwarnings("ignore", message=".*Using a slow image processor.*")
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*Some weights.*were not used.*")
+warnings.filterwarnings("ignore", message=".*Some weights.*were not initialized.*")
 
 # Habilitar fallback para CPU em operações MPS não suportadas
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
@@ -356,20 +365,24 @@ def load_image_processor(model_name_or_path: str, img_size: int = None):
     # Formato correto para size (RT-DETR requer height e width)
     size_dict = {"height": img_size, "width": img_size} if img_size else None
     
-    # Tentar AutoImageProcessor primeiro
+    # Tentar AutoImageProcessor primeiro (suprimir warnings)
     try:
-        if size_dict:
-            processor = AutoImageProcessor.from_pretrained(model_name_or_path, size=size_dict)
-        else:
-            processor = AutoImageProcessor.from_pretrained(model_name_or_path)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if size_dict:
+                processor = AutoImageProcessor.from_pretrained(model_name_or_path, size=size_dict)
+            else:
+                processor = AutoImageProcessor.from_pretrained(model_name_or_path)
         return processor
     except (ValueError, OSError) as e:
         # Se AutoImageProcessor falhar, tentar DetrImageProcessor
         try:
-            if size_dict:
-                processor = DetrImageProcessor.from_pretrained(model_name_or_path, size=size_dict)
-            else:
-                processor = DetrImageProcessor.from_pretrained(model_name_or_path)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                if size_dict:
+                    processor = DetrImageProcessor.from_pretrained(model_name_or_path, size=size_dict)
+                else:
+                    processor = DetrImageProcessor.from_pretrained(model_name_or_path)
             return processor
         except Exception as e2:
             # Se ainda falhar, criar processador genérico baseado em DETR
@@ -415,12 +428,30 @@ class COCODataset(Dataset):
         else:
             self.id_mapping = None
         
-        # Criar índice de imagens
-        self.images = {img["id"]: img for img in coco_data["images"]}
-        self.image_ids = list(self.images.keys())
+        # Criar índice de imagens e filtrar apenas as que existem
+        self.images = {}
+        self.image_ids = []
+        missing_images = []
+        
+        for img in coco_data["images"]:
+            img_path = self.image_dir / img["file_name"]
+            if img_path.exists():
+                self.images[img["id"]] = img
+                self.image_ids.append(img["id"])
+            else:
+                missing_images.append(img["file_name"])
+        
+        if missing_images:
+            print(f"⚠️  {len(missing_images)} imagens referenciadas no JSON não foram encontradas:")
+            for missing in missing_images[:5]:  # Mostrar apenas as primeiras 5
+                print(f"   - {missing}")
+            if len(missing_images) > 5:
+                print(f"   ... e mais {len(missing_images) - 5} imagens")
+            print(f"   Essas imagens serão ignoradas durante o treinamento.")
         
         print(f"📊 Dataset inicializado:")
-        print(f"   Imagens: {len(self.image_ids)}")
+        print(f"   Imagens válidas: {len(self.image_ids)}")
+        print(f"   Imagens faltando: {len(missing_images)}")
         print(f"   Categorias: {len(self.coco_data['categories'])}")
         print(f"   Anotações: {len(self.coco_data['annotations'])}")
     
@@ -431,6 +462,12 @@ class COCODataset(Dataset):
         image_id = self.image_ids[idx]
         img_info = self.images[image_id]
         img_path = self.image_dir / img_info["file_name"]
+        
+        # Verificar se arquivo existe (proteção adicional)
+        if not img_path.exists():
+            # Se não existir, tentar próximo índice válido
+            # Isso não deveria acontecer se filtramos no __init__, mas é uma proteção
+            raise FileNotFoundError(f"Imagem não encontrada: {img_path}")
         
         # Preparar anotações
         data = prepare_annotations_for_processor(
@@ -491,6 +528,7 @@ class RTDetrTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.eval_dataset_coco = eval_dataset_coco
         self.processor = processor
+        self._last_outputs = None  # Inicializar _last_outputs
     
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -503,9 +541,12 @@ class RTDetrTrainer(Trainer):
             return_outputs: Se True, retorna (loss, outputs)
             num_items_in_batch: Número de itens no batch (parâmetro novo do Trainer)
         """
-        labels = inputs.pop("labels")
+        # Criar cópia do inputs para não modificar o original
+        # Isso evita problemas quando o Trainer reutiliza o mesmo dicionário
+        model_inputs = {k: v for k, v in inputs.items() if k != "labels"}
+        labels = inputs.get("labels")
         
-        outputs = model(**inputs, labels=labels)
+        outputs = model(**model_inputs, labels=labels)
         
         loss = outputs.loss
         
@@ -528,7 +569,7 @@ class RTDetrTrainer(Trainer):
         
         return (loss, outputs) if return_outputs else loss
     
-    def log(self, logs):
+    def log(self, logs, start_time=None):
         """
         Sobrescreve log para adicionar losses individuais aos logs.
         """
@@ -542,7 +583,7 @@ class RTDetrTrainer(Trainer):
                 logs['loss_giou'] = float(self._last_outputs.loss_giou)
         
         # Chamar log padrão
-        super().log(logs)
+        super().log(logs, start_time=start_time)
     
     def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval"):
         """
@@ -599,8 +640,6 @@ class RTDetrTrainer(Trainer):
         
         if self.eval_dataset_coco is None:
             return {}
-        
-        import tempfile
         
         model = self.model
         device = next(model.parameters()).device
@@ -726,11 +765,19 @@ class RTDetrTrainer(Trainer):
                 "eval_recall": 0.0,
             }
         
-        # Salvar resultados temporários
+        # Salvar resultados temporários dentro do diretório do projeto
         # Nota: loadRes espera apenas uma lista de anotações, não um JSON completo
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        # Criar diretório temporário dentro do output_dir do projeto
+        temp_dir = Path(self.args.output_dir) / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Criar arquivo temporário com nome único baseado em timestamp
+        import uuid
+        temp_filename = f"eval_results_{uuid.uuid4().hex[:8]}.json"
+        results_path = temp_dir / temp_filename
+        
+        with open(results_path, 'w') as f:
             json.dump(all_results, f)
-            results_path = f.name
         
         try:
             # Carregar resultados no COCO
@@ -822,9 +869,9 @@ class RTDetrTrainer(Trainer):
             
         finally:
             # Limpar arquivo temporário
-            import os
             try:
-                os.unlink(results_path)
+                if results_path.exists():
+                    results_path.unlink()
             except:
                 pass
 
@@ -841,7 +888,16 @@ def train(
     eval_split: str = "valid",
     save_steps: int = 500,
     eval_steps: int = 500,
-    logging_steps: int = 50
+    logging_steps: int = 50,
+    weight_decay: float = 0.0001,
+    warmup_steps: int = 500,
+    warmup_ratio: float = None,
+    lr_scheduler_type: str = "cosine",
+    adam_beta1: float = 0.9,
+    adam_beta2: float = 0.999,
+    adam_epsilon: float = 1e-8,
+    max_grad_norm: float = 1.0,
+    fp16: bool = False
 ):
     """
     Treina modelo RT-DETR.
@@ -897,14 +953,16 @@ def train(
             import timm
             print("   ✅ Biblioteca 'timm' instalada e carregada!")
         
-        # Carregar modelo com configuração correta
-        model = AutoModelForObjectDetection.from_pretrained(
-            model_name_detr,
-            num_labels=num_labels,
-            id2label=id2label,
-            label2id=label2id,
-            ignore_mismatched_sizes=True  # Ignorar mismatch (modelo tem 92 classes COCO, precisamos de num_labels)
-        )
+        # Carregar modelo com configuração correta (suprimir warnings)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model = AutoModelForObjectDetection.from_pretrained(
+                model_name_detr,
+                num_labels=num_labels,
+                id2label=id2label,
+                label2id=label2id,
+                ignore_mismatched_sizes=True  # Ignorar mismatch (modelo tem 92 classes COCO, precisamos de num_labels)
+            )
         print(f"   ✅ Modelo DETR carregado com sucesso!")
         print(f"   ✅ Configuração: num_labels={num_labels}, classes={class_names}")
         
@@ -990,8 +1048,7 @@ def train(
         "per_device_eval_batch_size": batch_size,
         "gradient_accumulation_steps": gradient_accumulation_steps,
         "learning_rate": learning_rate,
-        "weight_decay": 0.0001,
-        "warmup_steps": 500,
+        "weight_decay": weight_decay,
         "logging_dir": str(out_dir / "logs"),
         "logging_steps": logging_steps,
         eval_param_name: eval_value,
@@ -1004,7 +1061,27 @@ def train(
         "greater_is_better": False,
         "report_to": "none",  # Desabilitar wandb/tensorboard padrão (usamos nosso próprio TensorBoard)
         "remove_unused_columns": False,
+        "lr_scheduler_type": lr_scheduler_type,
+        "adam_beta1": adam_beta1,
+        "adam_beta2": adam_beta2,
+        "adam_epsilon": adam_epsilon,
+        "max_grad_norm": max_grad_norm,
     }
+    
+    # Adicionar warmup (steps ou ratio, não ambos)
+    if warmup_ratio is not None:
+        training_args_kwargs["warmup_ratio"] = warmup_ratio
+    else:
+        training_args_kwargs["warmup_steps"] = warmup_steps
+    
+    # Adicionar fp16 se disponível e solicitado
+    if fp16:
+        # Verificar se fp16 está disponível (MPS não suporta fp16, então só CPU/GPU)
+        if torch.backends.mps.is_available():
+            print("⚠️  FP16 não suportado em MPS, usando FP32")
+        else:
+            training_args_kwargs["fp16"] = True
+            print("✅ FP16 habilitado para acelerar treinamento")
     
     training_args = TrainingArguments(**training_args_kwargs)
     
@@ -1019,7 +1096,7 @@ def train(
         train_dataset=train_dataset,
         eval_dataset=valid_dataset if valid_json.exists() else None,
         data_collator=collate_fn,
-        tokenizer=processor,
+        processing_class=processor,  # Usar processing_class em vez de tokenizer (deprecated)
         eval_dataset_coco=eval_json_path,  # Caminho do JSON COCO para avaliação
         processor=processor,  # Processor para avaliação
     )
@@ -1161,6 +1238,60 @@ def main():
         default=50,
         help="Log a cada N steps"
     )
+    parser.add_argument(
+        "--weight_decay",
+        type=float,
+        default=0.0001,
+        help="Weight decay para regularização"
+    )
+    parser.add_argument(
+        "--warmup_steps",
+        type=int,
+        default=500,
+        help="Número de steps de warmup"
+    )
+    parser.add_argument(
+        "--warmup_ratio",
+        type=float,
+        default=None,
+        help="Ratio de warmup (alternativa a warmup_steps, 0.0-1.0)"
+    )
+    parser.add_argument(
+        "--lr_scheduler_type",
+        type=str,
+        default="cosine",
+        choices=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
+        help="Tipo de scheduler de learning rate"
+    )
+    parser.add_argument(
+        "--adam_beta1",
+        type=float,
+        default=0.9,
+        help="Beta1 para otimizador Adam"
+    )
+    parser.add_argument(
+        "--adam_beta2",
+        type=float,
+        default=0.999,
+        help="Beta2 para otimizador Adam"
+    )
+    parser.add_argument(
+        "--adam_epsilon",
+        type=float,
+        default=1e-8,
+        help="Epsilon para otimizador Adam"
+    )
+    parser.add_argument(
+        "--max_grad_norm",
+        type=float,
+        default=1.0,
+        help="Gradient clipping (max norm)"
+    )
+    parser.add_argument(
+        "--fp16",
+        action="store_true",
+        help="Usar FP16 para acelerar treinamento (não suportado em MPS)"
+    )
     
     args = parser.parse_args()
     
@@ -1176,7 +1307,16 @@ def main():
         eval_split=args.eval_split,
         save_steps=args.save_steps,
         eval_steps=args.eval_steps,
-        logging_steps=args.logging_steps
+        logging_steps=args.logging_steps,
+        weight_decay=args.weight_decay,
+        warmup_steps=args.warmup_steps,
+        warmup_ratio=args.warmup_ratio,
+        lr_scheduler_type=args.lr_scheduler_type,
+        adam_beta1=args.adam_beta1,
+        adam_beta2=args.adam_beta2,
+        adam_epsilon=args.adam_epsilon,
+        max_grad_norm=args.max_grad_norm,
+        fp16=args.fp16
     )
 
 

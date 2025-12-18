@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Script para instalar dependências do projeto ObjectDetection_DETR
+# Script para instalar dependências do projeto ObjectDetection_RT-DETR
 
 set -e
 
-echo "📦 Instalando dependências do ObjectDetection_DETR..."
+echo "📦 Instalando dependências do ObjectDetection_RT-DETR..."
 echo ""
 
 # Verificar se está em ambiente virtual ou conda

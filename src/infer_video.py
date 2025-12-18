@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """
-Script para fazer inferência em vídeos com modelo DETR/RT-DETR treinado - ObjectDetection_DETR.
+Script para fazer inferência em vídeos com modelo DETR/RT-DETR treinado - ObjectDetection_RT-DETR.
 Processa vídeo frame por frame mantendo velocidade natural.
 """
 
+import os
 import json
 import argparse
+import warnings
+
+# Configurar ambiente ANTES de importar transformers
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
 from pathlib import Path
 import torch
 from PIL import Image
@@ -18,6 +24,15 @@ import csv
 from datetime import datetime
 
 from coco_utils import load_coco_json
+
+# Suprimir warnings específicos
+warnings.filterwarnings("ignore", category=UserWarning, module="torch.nn.modules.module")
+warnings.filterwarnings("ignore", message=".*copying from a non-meta parameter.*")
+warnings.filterwarnings("ignore", message=".*Using a slow image processor.*")
+warnings.filterwarnings("ignore", message=".*use_fast.*")
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*Some weights.*were not used.*")
+warnings.filterwarnings("ignore", message=".*Some weights.*were not initialized.*")
 
 
 def get_device():
@@ -96,7 +111,7 @@ def infer_video(
     model_dir: Path,
     video_path: Path,
     out_path: Path,
-    score_threshold: float = 0.3,
+    score_threshold: float = 0.8,
     dataset_dir: Path = None,
     show_preview: bool = False,
     show_control_id: bool = False
@@ -120,18 +135,24 @@ def infer_video(
     if not video_path.exists():
         raise FileNotFoundError(f"Vídeo não encontrado: {video_path}")
     
-    # Carregar modelo
+    # Carregar modelo (suprimir warnings)
     print(f"📥 Carregando modelo de {model_dir}...")
-    model = AutoModelForObjectDetection.from_pretrained(str(model_dir))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        model = AutoModelForObjectDetection.from_pretrained(str(model_dir))
     model.to(device)
     model.eval()
     
-    # Carregar processor com fallback
+    # Carregar processor com fallback (suprimir warnings)
     try:
-        processor = AutoImageProcessor.from_pretrained(str(model_dir))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            processor = AutoImageProcessor.from_pretrained(str(model_dir))
     except (ValueError, OSError):
         try:
-            processor = DetrImageProcessor.from_pretrained(str(model_dir))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                processor = DetrImageProcessor.from_pretrained(str(model_dir))
         except Exception:
             # Criar processador genérico
             processor = DetrImageProcessor(
@@ -422,7 +443,7 @@ def main():
     parser.add_argument(
         "--score_threshold",
         type=float,
-        default=0.3,
+        default=0.8,
         help="Threshold mínimo de score"
     )
     parser.add_argument(

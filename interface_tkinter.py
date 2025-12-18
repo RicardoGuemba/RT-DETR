@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Interface Tkinter moderna para ObjectDetection_DETR
+Interface Tkinter moderna para ObjectDetection_RT-DETR
 Gerencia treinamento, predição e download de dados.
 Design moderno com estado da arte em UI/UX.
 """
@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 import json
 from dotenv import load_dotenv
+import time
+import queue
 
 # Carregar variáveis de ambiente
 load_dotenv()
@@ -23,9 +25,9 @@ class ModernTkinterApp:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("🚀 ObjectDetection_DETR - Interface de Gerenciamento")
-        self.root.geometry("1200x800")
-        self.root.minsize(1000, 700)
+        self.root.title("🚀 ObjectDetection_RT-DETR - Interface de Gerenciamento")
+        # Abrir em tamanho “pleno” (sem precisar ajustar manualmente)
+        self._maximize_window(self.root, fallback_geometry="1200x800", minsize=(1000, 700))
         
         # Configurar estilo moderno
         self.setup_style()
@@ -33,6 +35,7 @@ class ModernTkinterApp:
         # Variáveis
         self.training_process = None
         self.inference_process = None
+        self.preview_window = None
         
         # Criar interface
         self.create_widgets()
@@ -79,7 +82,7 @@ class ModernTkinterApp:
         
         title_label = ttk.Label(
             title_frame,
-            text="🚀 ObjectDetection_DETR - Sistema de Detecção de Objetos",
+            text="🚀 ObjectDetection_RT-DETR - Sistema de Detecção de Objetos",
             style="Title.TLabel"
         )
         title_label.pack()
@@ -766,16 +769,29 @@ class ModernTkinterApp:
         main_panel = tk.PanedWindow(training_frame, orient=tk.HORIZONTAL, sashwidth=5)
         main_panel.pack(fill=tk.BOTH, expand=True)
         
-        # Painel esquerdo: Parâmetros
+        # Painel esquerdo: Parâmetros (com scroll)
         left_panel = ttk.Frame(main_panel, padding=15)
-        main_panel.add(left_panel, width=400)
+        main_panel.add(left_panel, width=450)
+        
+        # Container com scroll para parâmetros
+        canvas_params = tk.Canvas(left_panel, bg=self.bg_color, highlightthickness=0)
+        scrollbar_params = ttk.Scrollbar(left_panel, orient="vertical", command=canvas_params.yview)
+        scrollable_params = ttk.Frame(canvas_params)
+        
+        scrollable_params.bind(
+            "<Configure>",
+            lambda e: canvas_params.configure(scrollregion=canvas_params.bbox("all"))
+        )
+        
+        canvas_params.create_window((0, 0), window=scrollable_params, anchor="nw")
+        canvas_params.configure(yscrollcommand=scrollbar_params.set)
         
         # Título
-        title = ttk.Label(left_panel, text="Hiperparâmetros de Treinamento", style="Heading.TLabel")
+        title = ttk.Label(scrollable_params, text="Hiperparâmetros de Treinamento", style="Heading.TLabel")
         title.pack(pady=(0, 20))
         
-        # Formulário de parâmetros
-        params_frame = ttk.LabelFrame(left_panel, text="Parâmetros", padding=15)
+        # Formulário de parâmetros básicos
+        params_frame = ttk.LabelFrame(scrollable_params, text="Parâmetros Básicos", padding=15)
         params_frame.pack(fill=tk.X, pady=(0, 20))
         
         # Épocas
@@ -830,8 +846,77 @@ class ModernTkinterApp:
         eval_steps_entry = ttk.Entry(params_frame, textvariable=self.eval_steps_var, width=15)
         eval_steps_entry.grid(row=6, column=1, padx=5, pady=8)
         
+        # Parâmetros avançados de otimização
+        adv_params_frame = ttk.LabelFrame(scrollable_params, text="Parâmetros Avançados de Otimização", padding=15)
+        adv_params_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        # Weight Decay
+        ttk.Label(adv_params_frame, text="Weight Decay:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=8)
+        self.weight_decay_var = tk.StringVar(value="0.0001")
+        weight_decay_entry = ttk.Entry(adv_params_frame, textvariable=self.weight_decay_var, width=15)
+        weight_decay_entry.grid(row=0, column=1, padx=5, pady=8)
+        ttk.Label(adv_params_frame, text="(ex: 0.0001)", font=("Helvetica", 8), foreground="gray").grid(row=0, column=2, padx=5)
+        
+        # Warmup Steps
+        ttk.Label(adv_params_frame, text="Warmup Steps:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=8)
+        self.warmup_steps_var = tk.StringVar(value="500")
+        warmup_steps_entry = ttk.Entry(adv_params_frame, textvariable=self.warmup_steps_var, width=15)
+        warmup_steps_entry.grid(row=1, column=1, padx=5, pady=8)
+        
+        # Warmup Ratio (alternativa)
+        ttk.Label(adv_params_frame, text="Warmup Ratio:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=8)
+        self.warmup_ratio_var = tk.StringVar(value="")
+        warmup_ratio_entry = ttk.Entry(adv_params_frame, textvariable=self.warmup_ratio_var, width=15)
+        warmup_ratio_entry.grid(row=2, column=1, padx=5, pady=8)
+        ttk.Label(adv_params_frame, text="(opcional, 0.0-1.0)", font=("Helvetica", 8), foreground="gray").grid(row=2, column=2, padx=5)
+        
+        # LR Scheduler Type
+        ttk.Label(adv_params_frame, text="LR Scheduler:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=8)
+        self.lr_scheduler_var = tk.StringVar(value="cosine")
+        lr_scheduler_combo = ttk.Combobox(
+            adv_params_frame,
+            textvariable=self.lr_scheduler_var,
+            values=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
+            width=12,
+            state="readonly"
+        )
+        lr_scheduler_combo.grid(row=3, column=1, padx=5, pady=8)
+        
+        # Adam Beta1
+        ttk.Label(adv_params_frame, text="Adam Beta1:").grid(row=4, column=0, sticky=tk.W, padx=5, pady=8)
+        self.adam_beta1_var = tk.StringVar(value="0.9")
+        adam_beta1_entry = ttk.Entry(adv_params_frame, textvariable=self.adam_beta1_var, width=15)
+        adam_beta1_entry.grid(row=4, column=1, padx=5, pady=8)
+        
+        # Adam Beta2
+        ttk.Label(adv_params_frame, text="Adam Beta2:").grid(row=5, column=0, sticky=tk.W, padx=5, pady=8)
+        self.adam_beta2_var = tk.StringVar(value="0.999")
+        adam_beta2_entry = ttk.Entry(adv_params_frame, textvariable=self.adam_beta2_var, width=15)
+        adam_beta2_entry.grid(row=5, column=1, padx=5, pady=8)
+        
+        # Adam Epsilon
+        ttk.Label(adv_params_frame, text="Adam Epsilon:").grid(row=6, column=0, sticky=tk.W, padx=5, pady=8)
+        self.adam_epsilon_var = tk.StringVar(value="1e-8")
+        adam_epsilon_entry = ttk.Entry(adv_params_frame, textvariable=self.adam_epsilon_var, width=15)
+        adam_epsilon_entry.grid(row=6, column=1, padx=5, pady=8)
+        
+        # Max Grad Norm
+        ttk.Label(adv_params_frame, text="Max Grad Norm:").grid(row=7, column=0, sticky=tk.W, padx=5, pady=8)
+        self.max_grad_norm_var = tk.StringVar(value="1.0")
+        max_grad_norm_entry = ttk.Entry(adv_params_frame, textvariable=self.max_grad_norm_var, width=15)
+        max_grad_norm_entry.grid(row=7, column=1, padx=5, pady=8)
+        
+        # FP16
+        self.fp16_var = tk.BooleanVar(value=False)
+        fp16_check = ttk.Checkbutton(
+            adv_params_frame,
+            text="Usar FP16 (acelera treinamento, não suportado em MPS)",
+            variable=self.fp16_var
+        )
+        fp16_check.grid(row=8, column=0, columnspan=3, sticky=tk.W, padx=5, pady=8)
+        
         # Diretórios
-        dirs_frame = ttk.LabelFrame(left_panel, text="Diretórios", padding=15)
+        dirs_frame = ttk.LabelFrame(scrollable_params, text="Diretórios", padding=15)
         dirs_frame.pack(fill=tk.X, pady=(0, 20))
         
         ttk.Label(dirs_frame, text="Dataset:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
@@ -845,8 +930,12 @@ class ModernTkinterApp:
         ttk.Button(dirs_frame, text="📁", command=lambda: self.browse_directory(self.output_dir_var)).grid(row=1, column=2, padx=5)
         
         # Botões de ação
-        buttons_frame = ttk.Frame(left_panel)
+        buttons_frame = ttk.Frame(scrollable_params)
         buttons_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        # Pack canvas e scrollbar
+        canvas_params.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar_params.pack(side=tk.RIGHT, fill=tk.Y)
         
         self.train_btn = ttk.Button(
             buttons_frame,
@@ -886,7 +975,7 @@ class ModernTkinterApp:
         inference_frame = ttk.Frame(self.notebook, padding=20)
         self.notebook.add(inference_frame, text="🔮 Predição")
         
-        # Container principal
+        # Container principal: Configurações | Log
         main_panel = tk.PanedWindow(inference_frame, orient=tk.HORIZONTAL, sashwidth=5)
         main_panel.pack(fill=tk.BOTH, expand=True)
         
@@ -918,7 +1007,7 @@ class ModernTkinterApp:
         
         # Score Threshold
         ttk.Label(params_frame, text="Score Threshold:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=8)
-        self.score_threshold_var = tk.DoubleVar(value=0.3)
+        self.score_threshold_var = tk.DoubleVar(value=0.8)
         score_scale = ttk.Scale(
             params_frame,
             from_=0.0,
@@ -928,7 +1017,7 @@ class ModernTkinterApp:
             length=200
         )
         score_scale.grid(row=0, column=1, padx=5, pady=8)
-        self.score_threshold_label = ttk.Label(params_frame, text="0.30")
+        self.score_threshold_label = ttk.Label(params_frame, text="0.80")
         self.score_threshold_label.grid(row=0, column=2, padx=5)
         score_scale.configure(command=lambda v: self.score_threshold_label.config(text=f"{float(v):.2f}"))
         
@@ -960,7 +1049,8 @@ class ModernTkinterApp:
             params_frame,
             text="📺 Exibir preview em tempo real (velocidade do vídeo)",
             variable=self.show_preview_var,
-            state=tk.DISABLED  # Inicialmente desabilitado até selecionar vídeo
+            state=tk.DISABLED,  # Inicialmente desabilitado até selecionar vídeo
+            command=self.toggle_preview_panel
         )
         self.preview_check.grid(row=3, column=0, columnspan=3, sticky=tk.W, padx=5, pady=8)
         
@@ -1052,6 +1142,11 @@ class ModernTkinterApp:
             insertbackground="#ffffff"
         )
         self.inference_log.pack(fill=tk.BOTH, expand=True)
+        
+        # Variáveis para preview em tempo real
+        self.preview_queue = None
+        self.preview_thread = None
+        self.preview_stop_event = None
     
     def create_evaluation_tab(self):
         """Cria aba de avaliação."""
@@ -1194,6 +1289,125 @@ class ModernTkinterApp:
             # Habilitar preview apenas para vídeo
             if hasattr(self, 'preview_check'):
                 self.preview_check.config(state=tk.NORMAL)
+    
+    def toggle_preview_panel(self):
+        """Abre/fecha a janela de preview em tempo real (sem depender do PanedWindow)."""
+        # Só faz sentido para vídeo
+        if self.inference_input_type_var.get() != "video":
+            self.show_preview_var.set(False)
+            return
+
+        if self.show_preview_var.get():
+            self._ensure_preview_window()
+        else:
+            self._close_preview_window()
+
+    def _ensure_preview_window(self):
+        if self.preview_window and self.preview_window.winfo_exists():
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("📺 Preview em Tempo Real - Predições")
+        win.configure(bg="#000000")
+        # Ajustar para melhor visualização horizontal - usar mais largura
+        self._maximize_window(win, fallback_geometry="1400x800", minsize=(1200, 600))
+
+        # Se o usuário fechar a janela no “X”, desmarca o checkbox
+        def on_close():
+            self.show_preview_var.set(False)
+            self._close_preview_window()
+
+        win.protocol("WM_DELETE_WINDOW", on_close)
+
+        header = tk.Frame(win, bg="#111111")
+        header.pack(fill=tk.X)
+        tk.Label(
+            header,
+            text="Preview em Tempo Real (velocidade original do vídeo)",
+            bg="#111111",
+            fg="#ffffff",
+            font=("Helvetica", 12, "bold"),
+            padx=12,
+            pady=8,
+        ).pack(side=tk.LEFT)
+
+        self.preview_label = tk.Label(
+            win,
+            text="Aguardando frames...",
+            bg="#000000",
+            fg="#ffffff",
+            font=("Helvetica", 12),
+        )
+        self.preview_label.pack(fill=tk.BOTH, expand=True)
+
+        self.preview_window = win
+
+    def _close_preview_window(self):
+        try:
+            if self.preview_window and self.preview_window.winfo_exists():
+                self.preview_window.destroy()
+        finally:
+            self.preview_window = None
+            self.preview_label = None
+    
+    def update_preview_frame(self, frame_image):
+        """Atualiza o frame no preview."""
+        if self.preview_label and self.preview_window and self.preview_window.winfo_exists():
+            # Converter PIL Image para PhotoImage do Tkinter
+            from PIL import Image, ImageTk
+            import numpy as np
+            import cv2
+            
+            # Se for numpy array (OpenCV), converter para PIL
+            if isinstance(frame_image, np.ndarray):
+                frame_image = Image.fromarray(cv2.cvtColor(frame_image, cv2.COLOR_BGR2RGB))
+            
+            # Redimensionar para caber no painel mantendo aspect ratio - melhorar visualização horizontal
+            max_width = 1280  # Aumentar largura para melhor visualização
+            max_height = 720
+            
+            img_width, img_height = frame_image.size
+            scale = min(max_width / img_width, max_height / img_height, 1.0)
+            
+            if scale < 1.0:
+                new_width = int(img_width * scale)
+                new_height = int(img_height * scale)
+                frame_image = frame_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Converter para PhotoImage
+            photo = ImageTk.PhotoImage(frame_image)
+            
+            # Atualizar label
+            self.preview_label.config(image=photo, text="")
+            self.preview_label.image = photo  # Manter referência
+            
+            self.root.update_idletasks()
+
+    def _maximize_window(self, window, fallback_geometry="1200x800", minsize=(900, 650)):
+        """Tenta abrir a janela em tamanho máximo/cheio, com fallback para geometria grande."""
+        try:
+            window.minsize(minsize[0], minsize[1])
+        except Exception:
+            pass
+
+        # Windows/Linux geralmente suportam 'zoomed'. No macOS pode falhar; usamos fallback.
+        try:
+            window.state("zoomed")
+            return
+        except Exception:
+            pass
+
+        try:
+            sw = window.winfo_screenwidth()
+            sh = window.winfo_screenheight()
+            # Usar quase tela cheia (deixa margens pequenas para não “pular” em setups diferentes)
+            w = max(minsize[0], int(sw * 0.95))
+            h = max(minsize[1], int(sh * 0.90))
+            x = max(0, int((sw - w) / 2))
+            y = max(0, int((sh - h) / 3))
+            window.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            window.geometry(fallback_geometry)
     
     def update_status_bar(self, message):
         """Atualiza barra de status."""
@@ -1417,7 +1631,7 @@ class ModernTkinterApp:
     
     def start_training(self):
         """Inicia treinamento."""
-        # Validar parâmetros
+        # Validar parâmetros básicos
         try:
             epochs = int(self.epochs_var.get())
             batch_size = int(self.batch_size_var.get())
@@ -1426,6 +1640,18 @@ class ModernTkinterApp:
             gradient_accum = int(self.gradient_accum_var.get())
             save_steps = int(self.save_steps_var.get())
             eval_steps = int(self.eval_steps_var.get())
+            
+            # Parâmetros avançados
+            weight_decay = float(self.weight_decay_var.get())
+            warmup_steps = int(self.warmup_steps_var.get())
+            warmup_ratio_str = self.warmup_ratio_var.get().strip()
+            warmup_ratio = float(warmup_ratio_str) if warmup_ratio_str else None
+            lr_scheduler_type = self.lr_scheduler_var.get()
+            adam_beta1 = float(self.adam_beta1_var.get())
+            adam_beta2 = float(self.adam_beta2_var.get())
+            adam_epsilon = float(self.adam_epsilon_var.get())
+            max_grad_norm = float(self.max_grad_norm_var.get())
+            fp16 = self.fp16_var.get()
         except ValueError as e:
             messagebox.showerror("Erro", f"Parâmetros inválidos: {e}")
             return
@@ -1499,8 +1725,23 @@ class ModernTkinterApp:
                     "--learning_rate", str(learning_rate),
                     "--gradient_accumulation_steps", str(gradient_accum),
                     "--save_steps", str(save_steps),
-                    "--eval_steps", str(eval_steps)
+                    "--eval_steps", str(eval_steps),
+                    "--weight_decay", str(weight_decay),
+                    "--warmup_steps", str(warmup_steps),
+                    "--lr_scheduler_type", lr_scheduler_type,
+                    "--adam_beta1", str(adam_beta1),
+                    "--adam_beta2", str(adam_beta2),
+                    "--adam_epsilon", str(adam_epsilon),
+                    "--max_grad_norm", str(max_grad_norm),
                 ]
+                
+                # Adicionar warmup_ratio se fornecido
+                if warmup_ratio is not None:
+                    cmd.extend(["--warmup_ratio", str(warmup_ratio)])
+                
+                # Adicionar fp16 se habilitado
+                if fp16:
+                    cmd.append("--fp16")
                 
                 self.training_process = subprocess.Popen(
                     cmd,
@@ -1562,6 +1803,12 @@ class ModernTkinterApp:
         
         score_threshold = self.score_threshold_var.get()
         iou_threshold = self.iou_threshold_var.get()
+
+        # Para vídeo: abrir preview automaticamente (sem precisar marcar checkbox)
+        if input_type == "video":
+            if not self.show_preview_var.get():
+                self.show_preview_var.set(True)
+            self._ensure_preview_window()
         
         self.inference_btn.config(state=tk.DISABLED)
         self.stop_inference_btn.config(state=tk.NORMAL)
@@ -1577,17 +1824,30 @@ class ModernTkinterApp:
         
         def inference_thread():
             try:
+                # Se preview está ativo e é vídeo, processar diretamente (e atualizar janela)
+                if input_type == "video" and self.show_preview_var.get():
+                    self._process_video_with_preview(
+                        model_dir, input_path, score_threshold, iou_threshold
+                    )
+                    return
+                
                 # Determinar qual script usar
                 if input_type == "video":
+                    # Criar diretório de saída se não existir
+                    output_dir = Path(self.inference_output_var.get())
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    
                     # Usar script de vídeo
+                    out_video_path = output_dir / f"annotated_{Path(input_path).name}"
                     cmd = [
                         sys.executable, "src/infer_video.py",
                         "--model_dir", model_dir,
                         "--video_path", input_path,
-                        "--out_path", str(Path(self.inference_output_var.get()) / f"annotated_{Path(input_path).name}"),
+                        "--out_path", str(out_video_path),
                         "--score_threshold", str(score_threshold),
                         "--dataset_dir", "dataset"
                     ]
+                    
                     # Adicionar preview se solicitado
                     if self.show_preview_var.get():
                         cmd.append("--show_preview")
@@ -1638,12 +1898,180 @@ class ModernTkinterApp:
         
         threading.Thread(target=inference_thread, daemon=True).start()
     
+    def _process_video_with_preview(self, model_dir, video_path, score_threshold, iou_threshold):
+        """Processa vídeo diretamente com preview em tempo real E salva o vídeo."""
+        try:
+            import cv2
+            import torch
+            from PIL import Image
+            import numpy as np
+            sys.path.insert(0, str(Path(__file__).parent / "src"))
+            from transformers import AutoImageProcessor, AutoModelForObjectDetection
+            from coco_utils import load_coco_json
+            
+            self.log_message(self.inference_log, "📺 Modo preview ativo - processando em tempo real...")
+            
+            # Criar diretório de saída se não existir
+            output_dir = Path(self.inference_output_var.get())
+            output_dir.mkdir(parents=True, exist_ok=True)
+            out_video_path = output_dir / f"annotated_{Path(video_path).name}"
+            
+            self.log_message(self.inference_log, f"💾 Vídeo será salvo em: {out_video_path}")
+            
+            # Carregar modelo
+            device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+            model = AutoModelForObjectDetection.from_pretrained(model_dir)
+            model.to(device)
+            model.eval()
+            
+            processor = AutoImageProcessor.from_pretrained(model_dir)
+            
+            # Carregar categorias
+            category_names = {}
+            dataset_dir = Path("dataset")
+            for split in ["train", "valid", "test"]:
+                json_path = dataset_dir / f"{split}/_annotations.coco.json"
+                if json_path.exists():
+                    coco_data = load_coco_json(json_path)
+                    category_names = {cat["id"]: cat["name"] for cat in coco_data["categories"]}
+                    break
+            
+            # Abrir vídeo
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                raise RuntimeError(f"Não foi possível abrir o vídeo: {video_path}")
+            
+            fps = int(cap.get(cv2.CAP_PROP_FPS))
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            
+            self.log_message(self.inference_log, f"📊 FPS: {fps}, Resolução: {width}x{height}, Frames: {total_frames}")
+            
+            # Criar VideoWriter para salvar o vídeo processado
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out_video = cv2.VideoWriter(str(out_video_path), fourcc, fps, (width, height))
+            
+            if not out_video.isOpened():
+                raise RuntimeError(f"Não foi possível criar vídeo de saída: {out_video_path}")
+            
+            self.log_message(self.inference_log, f"💾 Salvando vídeo processado em: {out_video_path}")
+            
+            frame_count = 0
+            frame_time = 1.0 / fps if fps > 0 else 0.033  # Tempo por frame em segundos
+            next_frame_ts = time.perf_counter()
+            
+            with torch.no_grad():
+                while True:
+                    # Se o usuário desmarcou o preview ou fechou a janela, parar suavemente
+                    if not self.show_preview_var.get():
+                        break
+                    if not (self.preview_window and self.preview_window.winfo_exists()):
+                        break
+                    
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    
+                    frame_count += 1
+                    
+                    # Converter para PIL
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    pil_image = Image.fromarray(frame_rgb)
+                    
+                    # Processar
+                    inputs = processor(images=pil_image, return_tensors="pt")
+                    inputs = {k: v.to(device) for k, v in inputs.items()}
+                    
+                    # Predição
+                    outputs = model(**inputs)
+                    target_sizes = torch.tensor([pil_image.size[::-1]]).to(device)
+                    results = processor.post_process_object_detection(
+                        outputs, target_sizes=target_sizes, threshold=score_threshold
+                    )[0]
+                    
+                    # Coletar detecções e identificar a melhor (maior score)
+                    det_boxes = results["boxes"].cpu().numpy()
+                    det_scores = results["scores"].cpu().numpy()
+                    det_labels = results["labels"].cpu().numpy()
+
+                    best_idx = None
+                    best_score = -1.0
+                    for i, s in enumerate(det_scores):
+                        fs = float(s)
+                        if fs > best_score:
+                            best_score = fs
+                            best_idx = i
+
+                    # Desenhar detecções (marcar a melhor com centróide vermelho)
+                    for i, (box, score, label) in enumerate(
+                        zip(det_boxes, det_scores, det_labels)
+                    ):
+                        x1, y1, x2, y2 = [int(c) for c in box.tolist()]
+                        label_name = category_names.get(int(label), f"Class_{int(label)}")
+
+                        # BBox padrão (verde)
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        cv2.putText(
+                            frame,
+                            f"{label_name} {float(score):.2f}",
+                            (x1, max(0, y1 - 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.6,
+                            (0, 255, 0),
+                            2,
+                        )
+
+                        # Melhor bbox: desenhar centróide (círculo vermelho pequeno)
+                        if best_idx is not None and i == best_idx:
+                            cx = int((x1 + x2) / 2)
+                            cy = int((y1 + y2) / 2)
+                            cv2.circle(frame, (cx, cy), 6, (0, 0, 255), -1)  # vermelho (BGR)
+                            cv2.circle(frame, (cx, cy), 6, (255, 255, 255), 2)  # borda branca
+                    
+                    # Salvar frame no vídeo de saída
+                    out_video.write(frame)
+                    
+                    # Atualizar preview em tempo real
+                    self.update_preview_frame(frame)
+                    
+                    # Log progresso a cada 30 frames
+                    if frame_count % 30 == 0:
+                        progress = (frame_count / total_frames) * 100
+                        self.log_message(self.inference_log, f"Processando... {frame_count}/{total_frames} frames ({progress:.1f}%)")
+                    
+                    # Manter velocidade natural do vídeo (com compensação de tempo de processamento)
+                    next_frame_ts += frame_time
+                    sleep_s = next_frame_ts - time.perf_counter()
+                    if sleep_s > 0:
+                        time.sleep(sleep_s)
+            
+            # Fechar recursos
+            cap.release()
+            out_video.release()
+            
+            self.log_message(self.inference_log, f"\n✅ Preview concluído! {frame_count} frames processados")
+            self.log_message(self.inference_log, f"💾 Vídeo salvo em: {out_video_path}")
+            self.update_status_bar("Preview concluído! Vídeo salvo.")
+            
+            # Mostrar mensagem de sucesso
+            messagebox.showinfo("Sucesso", f"Vídeo processado e salvo!\n\nLocalização: {out_video_path}")
+            
+        except Exception as e:
+            self.log_message(self.inference_log, f"\n❌ Erro no preview: {e}")
+            import traceback
+            self.log_message(self.inference_log, traceback.format_exc())
+    
     def stop_inference(self):
         """Para inferência."""
         if self.inference_process:
             self.inference_process.terminate()
-            self.log_message(self.inference_log, "\n⚠️ Predição interrompida pelo usuário")
-            self.update_status_bar("Predição interrompida")
+            self.inference_process = None
+        self.log_message(self.inference_log, "\n⚠️ Predição interrompida pelo usuário")
+        self.update_status_bar("Predição interrompida")
+        # Fechar janela de preview se estiver aberta
+        self.show_preview_var.set(False)
+        self._close_preview_window()
     
     def start_evaluation(self):
         """Inicia avaliação."""

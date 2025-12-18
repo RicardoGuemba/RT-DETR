@@ -183,8 +183,15 @@ def prepare_annotations_for_processor(
     Returns:
         Dict com 'image' (PIL Image) e 'annotations' (dict no formato COCO)
     """
+    # Verificar se arquivo existe
+    if not image_path.exists():
+        raise FileNotFoundError(f"Imagem não encontrada: {image_path}")
+    
     # Carregar imagem
-    image = Image.open(image_path).convert("RGB")
+    try:
+        image = Image.open(image_path).convert("RGB")
+    except Exception as e:
+        raise IOError(f"Erro ao carregar imagem {image_path}: {e}")
     
     # Obter anotações da imagem
     annotations = get_image_annotations(image_id, coco_data)

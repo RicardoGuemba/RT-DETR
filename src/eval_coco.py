@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """
-Script para avaliar modelo DETR/RT-DETR usando COCOeval - ObjectDetection_DETR.
+Script para avaliar modelo DETR/RT-DETR usando COCOeval - ObjectDetection_RT-DETR.
 """
 
+import os
 import json
 import argparse
+import warnings
+
+# Configurar ambiente ANTES de importar transformers
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
 from pathlib import Path
 import torch
 from tqdm import tqdm
@@ -14,6 +20,15 @@ from transformers import AutoImageProcessor, AutoModelForObjectDetection, DetrIm
 from PIL import Image
 
 from coco_utils import load_coco_json, create_coco_results, ensure_coco_info_file
+
+# Suprimir warnings específicos
+warnings.filterwarnings("ignore", category=UserWarning, module="torch.nn.modules.module")
+warnings.filterwarnings("ignore", message=".*copying from a non-meta parameter.*")
+warnings.filterwarnings("ignore", message=".*Using a slow image processor.*")
+warnings.filterwarnings("ignore", message=".*use_fast.*")
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*Some weights.*were not used.*")
+warnings.filterwarnings("ignore", message=".*Some weights.*were not initialized.*")
 
 
 def get_device():
@@ -43,18 +58,24 @@ def evaluate_model(
     device = get_device()
     print(f"🔧 Device: {device}")
     
-    # Carregar modelo
+    # Carregar modelo (suprimir warnings)
     print(f"📥 Carregando modelo de {model_dir}...")
-    model = AutoModelForObjectDetection.from_pretrained(str(model_dir))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        model = AutoModelForObjectDetection.from_pretrained(str(model_dir))
     model.to(device)
     model.eval()
     
-    # Carregar processor com fallback
+    # Carregar processor com fallback (suprimir warnings)
     try:
-        processor = AutoImageProcessor.from_pretrained(str(model_dir))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            processor = AutoImageProcessor.from_pretrained(str(model_dir))
     except (ValueError, OSError):
         try:
-            processor = DetrImageProcessor.from_pretrained(str(model_dir))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                processor = DetrImageProcessor.from_pretrained(str(model_dir))
         except Exception:
             # Criar processador genérico
             processor = DetrImageProcessor(

@@ -203,8 +203,8 @@ def download_with_sdk(api_key: str, workspace: str, project: str, version: int, 
         if dataset_root != output_dir:
             print(f"   📦 Movendo arquivos para o diretório principal...")
             
-            # Criar temp para evitar conflitos
-            temp_root = output_dir.parent / f"temp_{output_dir.name}"
+            # Criar temp dentro do diretório do projeto para evitar conflitos
+            temp_root = output_dir / f".temp_{output_dir.name}"
             
             # Copiar conteúdo
             for item in dataset_root.iterdir():

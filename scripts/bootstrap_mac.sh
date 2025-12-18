@@ -2,7 +2,7 @@
 
 set -e
 
-echo "🚀 Configurando ambiente ObjectDetection_DETR para Mac..."
+echo "🚀 Configurando ambiente ObjectDetection_RT-DETR para Mac..."
 
 # Criar venv se não existir
 if [ ! -d ".venv" ]; then

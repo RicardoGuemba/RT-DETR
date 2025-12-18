@@ -1,4 +1,4 @@
-# ObjectDetection_DETR - Sistema de Detecção de Objetos
+# ObjectDetection_RT-DETR - Sistema de Detecção de Objetos
 
 Sistema completo para treinar e avaliar modelos DETR/RT-DETR usando datasets COCO JSON do Roboflow, otimizado para MacBook com Apple Silicon (MPS).
 
@@ -30,14 +30,17 @@ python app.py
 **Funcionalidades:**
 - 🎨 **Design moderno** com interface totalmente gráfica
 - 📥 **Download de dataset** com seleção de versão (spinbox)
-- 🏋️ **Treinamento completo** com todos os hiperparâmetros editáveis:
-  - Épocas, Batch Size, Tamanho da Imagem (dropdown)
-  - Learning Rate, Gradient Accumulation
-  - Save Steps, Eval Steps
+- 🏋️ **Treinamento completo** com hiperparâmetros avançados editáveis:
+  - **Básicos**: Épocas, Batch Size, Tamanho da Imagem, Learning Rate, Gradient Accumulation
+  - **Avançados**: Weight Decay, Warmup Steps/Ratio, LR Scheduler Type
+  - **Otimizador Adam**: Beta1, Beta2, Epsilon, Max Grad Norm
+  - **Aceleração**: FP16 (quando disponível)
+  - Save Steps, Eval Steps, Logging Steps
 - 🔮 **Predição avançada** com controles gráficos:
-  - Score Threshold (slider 0.0-1.0 com valor em tempo real)
+  - Score Threshold (slider 0.0-1.0 com valor em tempo real, padrão: 0.8)
   - IOU Threshold (slider 0.0-1.0 com valor em tempo real)
   - Max Detections
+  - Preview em tempo real para vídeos (tela otimizada horizontalmente)
 - 📊 **Avaliação** de modelos treinados
 - ✅ **Status do sistema** em tempo real
 - 📝 **Logs coloridos** em tempo real (tema escuro)
@@ -164,30 +167,48 @@ python interface.py
 
 **Ou via linha de comando:**
 ```bash
-python src/infer_images.py --model_dir runs_rtdetr/model_best --input_dir dataset/test --out_dir runs_rtdetr/infer_test --score_threshold 0.3
+python src/infer_images.py --model_dir runs_rtdetr/model_best --input_dir dataset/test --out_dir runs_rtdetr/infer_test --score_threshold 0.8
 ```
+
+> 💡 **Nota**: O threshold padrão foi atualizado para **0.8** para melhor precisão nas detecções.
 
 ## 📁 Estrutura do Projeto
 
 ```
-ObjectDetection_DETR/
+ObjectDetection_RT-DETR/
   README.md
   requirements.txt
   .env.example
   app.py                          # Ponto de entrada principal (Tkinter)
   interface_tkinter.py            # Interface gráfica Tkinter
   interface.py                    # Interface CLI (alternativa)
-  dataset/                        # gerado pelo download
-  runs_rtdetr/                    # outputs (checkpoints, logs, modelos)
-  scripts/
+  test_setup.py                   # Script de teste do ambiente
+  
+  # Diretórios organizados
+  dataset/                        # Dataset COCO (gerado pelo download)
+  data/
+    downloads/                    # Downloads de datasets
+    videos/                       # Vídeos para processamento
+  
+  outputs/
+    models/                       # Modelos treinados
+    inference/                    # Resultados de inferência
+    logs/                         # Logs de treinamento
+  
+  runs_rtdetr/                    # Outputs de treinamento (legado)
+  
+  docs/                           # Documentação adicional
+  scripts/                        # Scripts auxiliares
     bootstrap_mac.sh
     download_roboflow_coco.py
     sanity_coco.py
-  src/
-    train_rtdetr.py
+    ...
+  
+  src/                            # Código fonte principal
+    train_rtdetr.py              # Treinamento com hiperparâmetros avançados
     eval_coco.py
-    infer_images.py
-    infer_video.py
+    infer_images.py              # Inferência em imagens (threshold padrão: 0.8)
+    infer_video.py               # Inferência em vídeos (threshold padrão: 0.8)
     coco_utils.py
 ```
 

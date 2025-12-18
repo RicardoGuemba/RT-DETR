@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Interface CLI para ObjectDetection_DETR
+Interface CLI para ObjectDetection_RT-DETR
 Gerencia treinamento, predição e download de dados.
 """
 
@@ -20,7 +20,7 @@ def clear_screen():
 def print_header():
     """Imprime cabeçalho."""
     print("="*70)
-    print("🚀 ObjectDetection_DETR - Interface de Gerenciamento")
+    print("🚀 ObjectDetection_RT-DETR - Interface de Gerenciamento")
     print("="*70)
     print()
 
@@ -330,8 +330,8 @@ def run_inference():
         output_dir = "runs_rtdetr/infer_out"
     
     # Score threshold
-    threshold = input("Score threshold [0.3]: ").strip()
-    threshold = float(threshold) if threshold else 0.3
+    threshold = input("Score threshold [0.8]: ").strip()
+    threshold = float(threshold) if threshold else 0.8
     
     print(f"\n🔮 Executando inferência...")
     print(f"   Modelo: {model_dir}")

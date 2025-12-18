@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """
-Script para fazer inferência com modelo DETR/RT-DETR treinado - ObjectDetection_DETR.
+Script para fazer inferência com modelo DETR/RT-DETR treinado - ObjectDetection_RT-DETR.
 """
 
+import os
 import json
 import argparse
+import warnings
+
+# Configurar ambiente ANTES de importar transformers
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
 from pathlib import Path
 import torch
 from PIL import Image, ImageDraw, ImageFont
@@ -16,6 +22,15 @@ import csv
 from datetime import datetime
 
 from coco_utils import load_coco_json
+
+# Suprimir warnings específicos
+warnings.filterwarnings("ignore", category=UserWarning, module="torch.nn.modules.module")
+warnings.filterwarnings("ignore", message=".*copying from a non-meta parameter.*")
+warnings.filterwarnings("ignore", message=".*Using a slow image processor.*")
+warnings.filterwarnings("ignore", message=".*use_fast.*")
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*Some weights.*were not used.*")
+warnings.filterwarnings("ignore", message=".*Some weights.*were not initialized.*")
 
 
 def get_device():
@@ -77,7 +92,7 @@ def infer_images(
     model_dir: Path,
     input_dir: Path,
     out_dir: Path,
-    score_threshold: float = 0.3,
+    score_threshold: float = 0.8,
     iou_threshold: float = 0.5,
     dataset_dir: Path = None,
     input_file: Path = None,
@@ -99,18 +114,24 @@ def infer_images(
     device = get_device()
     print(f"🔧 Device: {device}")
     
-    # Carregar modelo
+    # Carregar modelo (suprimir warnings)
     print(f"📥 Carregando modelo de {model_dir}...")
-    model = AutoModelForObjectDetection.from_pretrained(str(model_dir))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        model = AutoModelForObjectDetection.from_pretrained(str(model_dir))
     model.to(device)
     model.eval()
     
-    # Carregar processor com fallback
+    # Carregar processor com fallback (suprimir warnings)
     try:
-        processor = AutoImageProcessor.from_pretrained(str(model_dir))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            processor = AutoImageProcessor.from_pretrained(str(model_dir))
     except (ValueError, OSError):
         try:
-            processor = DetrImageProcessor.from_pretrained(str(model_dir))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                processor = DetrImageProcessor.from_pretrained(str(model_dir))
         except Exception:
             # Criar processador genérico
             processor = DetrImageProcessor(
@@ -144,40 +165,42 @@ def infer_images(
     video_extensions = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv"}
     
     if input_file and input_file.exists():
-            # Processar arquivo único
-            if input_file.suffix.lower() in video_extensions:
-                # É um vídeo - usar módulo de vídeo
-                print(f"📹 Detectado vídeo: {input_file}")
-                try:
-                    import sys
-                    from pathlib import Path as PathLib
-                    sys.path.insert(0, str(PathLib(__file__).parent))
-                    from infer_video import infer_video
-                    out_dir.mkdir(parents=True, exist_ok=True)
-                    out_video_path = out_dir / f"annotated_{input_file.name}"
-                    infer_video(
-                        model_dir=model_dir,
-                        video_path=input_file,
-                        out_path=out_video_path,
-                        score_threshold=score_threshold,
-                        dataset_dir=dataset_dir,
-                        show_control_id=show_control_id
-                    )
-                    return
-                except ImportError as e:
-                    print(f"❌ Erro ao importar módulo infer_video: {e}")
-                    print("   Certifique-se de que opencv-python está instalado: pip install opencv-python")
-                    return
-                except Exception as e:
-                    print(f"❌ Erro ao processar vídeo: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    return
+        # Processar arquivo único
+        if input_file.suffix.lower() in video_extensions:
+            # É um vídeo - usar módulo de vídeo
+            print(f"📹 Detectado vídeo: {input_file}")
+            try:
+                import sys
+                from pathlib import Path as PathLib
+                sys.path.insert(0, str(PathLib(__file__).parent))
+                from infer_video import infer_video
+                out_dir.mkdir(parents=True, exist_ok=True)
+                out_video_path = out_dir / f"annotated_{input_file.name}"
+                infer_video(
+                    model_dir=model_dir,
+                    video_path=input_file,
+                    out_path=out_video_path,
+                    score_threshold=score_threshold,
+                    dataset_dir=dataset_dir,
+                    show_control_id=show_control_id
+                )
+                return
+            except ImportError as e:
+                print(f"❌ Erro ao importar módulo infer_video: {e}")
+                print("   Certifique-se de que opencv-python está instalado: pip install opencv-python")
+                return
+            except Exception as e:
+                print(f"❌ Erro ao processar vídeo: {e}")
+                import traceback
+                traceback.print_exc()
+                return
         else:
             # É uma imagem única
             print(f"🖼️  Processando imagem única: {input_file}")
             image_files = [input_file]
             input_dir = input_file.parent
+            # Garantir que out_dir existe para arquivo único
+            out_dir.mkdir(parents=True, exist_ok=True)
     else:
         # Processar diretório de imagens
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -192,6 +215,9 @@ def infer_images(
         if len(image_files) == 0:
             print(f"❌ Nenhuma imagem encontrada em {input_dir}")
             return
+    
+    # Garantir que out_dir existe antes de criar CSV
+    out_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"📊 Processando {len(image_files)} imagens...")
     
@@ -383,7 +409,7 @@ def main():
     parser.add_argument(
         "--score_threshold",
         type=float,
-        default=0.3,
+        default=0.8,
         help="Threshold mínimo de score"
     )
     parser.add_argument(

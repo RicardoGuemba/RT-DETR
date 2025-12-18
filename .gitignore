@@ -12,6 +12,7 @@ env/
 # Dataset e outputs
 dataset/
 runs_rtdetr/
+runs_rtdetr_test/
 *.pth
 *.pt
 *.ckpt
@@ -43,3 +44,6 @@ Thumbs.db
 *.log
 logs/
 
+# Dados e outputs organizados
+data/
+outputs/

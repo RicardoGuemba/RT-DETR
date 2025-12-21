@@ -1,0 +1,16 @@
+{
+  "paths": {
+    "datasets": "data/datasets",
+    "models": "data/models/experiments",
+    "pretrained_models": "data/models/pretrained",
+    "outputs": "data/outputs/predictions",
+    "evaluations": "data/outputs/evaluations",
+    "logs": "data/logs/training",
+    "tensorboard_logs": "data/logs/tensorboard"
+  },
+  "defaults": {
+    "dataset": "data/datasets/default",
+    "output": "data/models/experiments/default",
+    "model": "data/models/experiments/default/model_best"
+  }
+}

@@ -296,8 +296,12 @@ Durante o treinamento, você verá:
 ## 📝 Notas Técnicas
 
 - Usa `PYTORCH_ENABLE_MPS_FALLBACK=1` para fallback automático quando MPS não suporta operações
-- Modelo base: `PekingU/rtdetr_r50vd` do Hugging Face Transformers
+- **Modelo base: RT-DETRv2 OBRIGATÓRIO** - `PekingU/rtdetr_v2_r50vd` do Hugging Face Transformers
+  - ⚠️ **IMPORTANTE**: Este sistema requer RT-DETRv2 exclusivamente
+  - ❌ **SEM fallback** para RT-DETR v1 ou DETR padrão
+  - Para usar RT-DETR v1, utilize outro sistema
 - Dataset format: COCO JSON exportado do Roboflow
+- Requer `transformers>=4.45.0` para suporte completo ao RT-DETRv2
 
 ## 🔒 Segurança
 

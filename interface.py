@@ -144,6 +144,10 @@ def train_model():
     print("Parâmetros de Treinamento:")
     print("(Pressione Enter para usar valores padrão)")
     print()
+
+    model_name = input("Modelo (HF) [PekingU/rtdetr_r50vd]: ").strip()
+    if not model_name:
+        model_name = "PekingU/rtdetr_r50vd"
     
     epochs = input("Número de épocas [50]: ").strip()
     epochs = int(epochs) if epochs else 50
@@ -159,15 +163,32 @@ def train_model():
     
     gradient_accum = input("Gradient accumulation steps [4]: ").strip()
     gradient_accum = int(gradient_accum) if gradient_accum else 4
+
+    weight_decay = input("Weight decay [1e-4]: ").strip()
+    weight_decay = float(weight_decay) if weight_decay else 1e-4
+
+    warmup_ratio = input("Warmup ratio [0.0]: ").strip()
+    warmup_ratio = float(warmup_ratio) if warmup_ratio else 0.0
+
+    lr_scheduler_type = input("LR scheduler [cosine]: ").strip()
+    lr_scheduler_type = lr_scheduler_type if lr_scheduler_type else "cosine"
+
+    max_steps = input("Max steps (-1 = usar epochs) [-1]: ").strip()
+    max_steps = int(max_steps) if max_steps else -1
     
     print()
     print("="*70)
     print("Parâmetros configurados:")
+    print(f"  Modelo (HF): {model_name}")
     print(f"  Épocas: {epochs}")
     print(f"  Batch size: {batch_size}")
     print(f"  Tamanho da imagem: {img_size}")
     print(f"  Learning rate: {learning_rate}")
     print(f"  Gradient accumulation: {gradient_accum}")
+    print(f"  Weight decay: {weight_decay}")
+    print(f"  Warmup ratio: {warmup_ratio}")
+    print(f"  Scheduler: {lr_scheduler_type}")
+    print(f"  Max steps: {max_steps}")
     print("="*70)
     print()
     
@@ -188,11 +209,16 @@ def train_model():
             sys.executable, "src/train_rtdetr.py",
             "--dataset_dir", "dataset",
             "--out_dir", "runs_rtdetr",
+            "--model_name", model_name,
             "--epochs", str(epochs),
             "--batch_size", str(batch_size),
             "--img_size", str(img_size),
             "--learning_rate", str(learning_rate),
-            "--gradient_accumulation_steps", str(gradient_accum)
+            "--gradient_accumulation_steps", str(gradient_accum),
+            "--weight_decay", str(weight_decay),
+            "--warmup_ratio", str(warmup_ratio),
+            "--lr_scheduler_type", str(lr_scheduler_type),
+            "--max_steps", str(max_steps),
         ]
         
         subprocess.run(cmd, check=False)

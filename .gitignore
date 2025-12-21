@@ -47,3 +47,10 @@ logs/
 # Dados e outputs organizados
 data/
 outputs/
+
+# Build artifacts
+ObjectDetection_RT-DETR.app
+ObjectDetection_RT-DETR.spec
+build/
+dist/
+build_log.txt
